@@ -69,7 +69,7 @@ cyberdeck-esp32s3/
     ├── 06_lf_rfid_rdm6300/
     │   ├── 6.1_carrier_modulation/
     │   ├── 6.2_tag_read/
-    │   ├── 6.3_em4100_decoding/
+    │   ├── 6.3_rdm6300_payload_decode/
     │   ├── 6.4_signature_storage/
     │   ├── 6.5_t5577_write/
     │   └── 6.6_coil_emulation/
