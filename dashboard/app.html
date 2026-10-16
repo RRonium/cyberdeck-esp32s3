@@ -55,6 +55,16 @@
         </div>
       </div>
 
+      <div class="s-nrf">
+        <button class="sub-toggle" aria-expanded="false" aria-controls="list-nrf" onclick="toggleSub(this)">
+          <span>Subsystem 4 · nRF24</span><span class="chev">▾</span>
+        </button>
+        <div class="sub-list" id="list-nrf" hidden>
+          <button class="mod-btn" data-mod="4.1" onclick="switchModule('4.1', this)">4.1 Spectrum Scan</button>
+          <button class="mod-btn" data-mod="4.2" onclick="switchModule('4.2', this)">4.2 Packet Sniffer</button>
+        </div>
+      </div>
+
       <div class="s-ir">
         <button class="sub-toggle" aria-expanded="false" aria-controls="list-ir" onclick="toggleSub(this)">
           <span>Subsystem 7 · Infrared</span><span class="chev">▾</span>
