@@ -29,6 +29,8 @@
  *           IRremoteESP8266   (Library Manager -> "IRremoteESP8266"
  *           by David Conran / crankyoldgit) — needed for modules
  *           7.3 / 7.4 only.
+ *           RF24              (Library Manager -> "RF24" by TMRh20) —
+ *           needed for the 2.4GHz nRF24 modules (4.x).
  *
  * NON-BLOCKING NOTES (read this before adding more modules):
  *   - All module polling is gated by millis(), not delay(). The
@@ -65,6 +67,8 @@
 #include <IRrecv.h>
 #include <IRsend.h>
 #include <IRutils.h>
+#include <SPI.h>
+#include <RF24.h>
 
 // ===================================================================
 // PIN MAP (defaults — remap here if your wiring differs)
@@ -75,13 +79,16 @@ static const uint16_t IR_TX_PIN = 5;   // IR transmitter LED (via NPN/driver -> 
 // GPIO4 / GPIO5 are plain GPIOs on the S3: not strapping pins
 // (0/3/45/46), not USB (19/20), not flash/PSRAM (26-37).
 //
-// Reserved for future modules (not used yet — documented here so
-// 04_2.4ghz_nrf24 / 05_nfc_pn532 don't collide with IR or each other
-// when they're merged in next):
-//   nRF24L01  (SPI)  CE=GPIO6  CSN=GPIO7  SCK=GPIO12 MISO=GPIO13 MOSI=GPIO11
-//                    (S3 default FSPI pins. Do NOT use 35/36/37: on
-//                    octal-PSRAM boards like N8R8/N16R8 those are wired
-//                    to the PSRAM and are unusable.)
+// nRF24L01+ (SPI) — modules 4.x
+static const uint8_t NRF_CE_PIN   = 6;
+static const uint8_t NRF_CSN_PIN  = 7;
+static const uint8_t NRF_SCK_PIN  = 12;
+static const uint8_t NRF_MISO_PIN = 13;
+static const uint8_t NRF_MOSI_PIN = 11;
+// (S3 default FSPI pins. Do NOT use 35/36/37: on octal-PSRAM boards like
+//  N8R8/N16R8 those are wired to the PSRAM and are unusable.)
+//
+// Reserved for the next module set (not used yet):
 //   PN532     (I2C)  SDA=GPIO8 SCL=GPIO9  (keep off the nRF24 SPI bus)
 
 static const uint16_t IR_CAPTURE_BUFFER_SIZE = 1024;
@@ -127,6 +134,16 @@ uint16_t lastIrRaw[IR_CAPTURE_BUFFER_SIZE];
 uint16_t lastIrRawLen = 0;
 unsigned long irTestPulseCount = 0;   // 7.6 pulses fired since START
 
+// --- 2.4GHz nRF24 (modules 4.x) ---
+// Educational / authorized-lab RF diagnostics, same scope as the Wi-Fi and
+// BLE tools: only audit radios you own or are permitted to test.
+RF24 radio(NRF_CE_PIN, NRF_CSN_PIN);
+bool nrfReady = false;                 // radio.begin() + chip check passed once
+uint8_t nrfChannel = 0;                // current channel during a scan / sniff
+static const uint8_t  NRF_SNIFF_START_CH = 0;    // 4.2 hop range start
+static const uint8_t  NRF_SNIFF_END_CH   = 83;   // 4.2 hop range end (2400-2483 MHz)
+static const uint64_t NRF_SNIFF_ADDR = 0xE7E7E7E7E7ULL;  // nRF24 factory-default pipe
+
 JsonDocument telemetryDoc;
 
 // ===================================================================
@@ -144,6 +161,17 @@ void emitTelemetry(const char* module, const char* status) {
 void emitError(const char* module, const char* msg) {
   telemetryDoc["data"]["msg"] = msg;
   emitTelemetry(module, "error");
+}
+
+// ===================================================================
+// nRF24 INIT — lazy one-time bring-up; reports if the module is missing
+// ===================================================================
+bool ensureNrf() {
+  if (nrfReady) return true;
+  SPI.begin(NRF_SCK_PIN, NRF_MISO_PIN, NRF_MOSI_PIN, NRF_CSN_PIN);
+  if (!radio.begin() || !radio.isChipConnected()) return false;
+  nrfReady = true;
+  return true;
 }
 
 // ===================================================================
@@ -230,6 +258,26 @@ void startModule(const String& module) {
     pBLEScan->start(0, nullptr, false);  // continuous async scan for target discovery
   } else if (module == "2.4") {
     if (pAdvertising) pAdvertising->start();
+  } else if (module == "4.1") {
+    if (!ensureNrf()) { emitError("4.1", "nrf_not_found"); activeModule = "NONE"; return; }
+    radio.powerUp();
+    radio.setAutoAck(false);
+    radio.disableCRC();
+    radio.setDataRate(RF24_1MBPS);
+    radio.setPayloadSize(32);
+    radio.stopListening();
+    nrfChannel = 0;
+  } else if (module == "4.2") {
+    if (!ensureNrf()) { emitError("4.2", "nrf_not_found"); activeModule = "NONE"; return; }
+    radio.powerUp();
+    radio.setAutoAck(false);
+    radio.disableCRC();
+    radio.setDataRate(RF24_2MBPS);
+    radio.setPayloadSize(32);
+    nrfChannel = NRF_SNIFF_START_CH;
+    radio.setChannel(nrfChannel);
+    radio.openReadingPipe(1, NRF_SNIFF_ADDR);
+    radio.startListening();
   } else if (module == "7.1") {
     if (!ledcAttach(IR_TX_PIN, IR_CARRIER_HZ, IR_CARRIER_RES_BITS)) {
       emitError("7.1", "ledc_attach_failed");
@@ -273,6 +321,8 @@ void stopModule() {
     irrecv.disableIRIn();
   } else if (activeModule == "7.6") {
     digitalWrite(IR_TX_PIN, LOW);
+  } else if (activeModule == "4.1" || activeModule == "4.2") {
+    if (nrfReady) { radio.stopListening(); radio.powerDown(); }
   } else if (activeModule == "1.1" && wifiScanState == WSCAN_RUNNING) {
     WiFi.scanDelete();
     wifiScanState = WSCAN_IDLE;
@@ -532,6 +582,55 @@ void loop() {
       bleTargetFound = false;
       bleTestAttempts = 0;
       activeModule = "NONE";
+    }
+  }
+
+  // --- 2.4GHZ nRF24 SUBSYSTEM ---
+  // 4.1 spectrum scan: one channel per pass, 32 RPD samples each, cycling 0-125.
+  else if (activeModule == "4.1") {
+    if (now - moduleActionMillis >= 12) {
+      moduleActionMillis = now;
+      radio.setChannel(nrfChannel);
+      uint8_t hits = 0;
+      for (uint8_t i = 0; i < 32; i++) {
+        radio.startListening();
+        delayMicroseconds(130);
+        radio.stopListening();
+        if (radio.testRPD()) hits++;
+      }
+      telemetryDoc["data"]["ch"] = nrfChannel;
+      telemetryDoc["data"]["mhz"] = 2400 + nrfChannel;
+      telemetryDoc["data"]["level"] = hits;        // 0-32 carrier hits this pass
+      emitTelemetry("4.1", "ok");
+      nrfChannel = (nrfChannel + 1) % 126;
+    }
+  }
+  // 4.2 packet sniffer: listen on the default pipe, hop channel once a second,
+  // dump any received payload as hex. (Pipe-address capture; full promiscuous
+  // mode is a later refinement and wants a confirmed nRF24L01+, not a clone.)
+  else if (activeModule == "4.2") {
+    if (now - moduleStateMillis >= 1000) {
+      moduleStateMillis = now;
+      nrfChannel++;
+      if (nrfChannel > NRF_SNIFF_END_CH) nrfChannel = NRF_SNIFF_START_CH;
+      radio.stopListening();
+      radio.setChannel(nrfChannel);
+      radio.startListening();
+    }
+    if (radio.available()) {
+      uint8_t buf[32];
+      radio.read(buf, 32);
+      String hex = "";
+      for (uint8_t i = 0; i < 32; i++) {
+        char b[3];
+        sprintf(b, "%02X", buf[i]);
+        hex += b;
+      }
+      telemetryDoc["data"]["ch"] = nrfChannel;
+      telemetryDoc["data"]["addr"] = "pipe1";
+      telemetryDoc["data"]["len"] = 32;
+      telemetryDoc["data"]["payload"] = hex;
+      emitTelemetry("4.2", "ok");
     }
   }
 
