@@ -204,13 +204,21 @@ jump to its live view (`syncScreenToSerial()`).
   affine calibration saved in `Preferences` (runs on first boot, or hold the
   screen at power-on, or Setup → Recalibrate). Buttons highlight on DOWN and
   act on UP.
-- **Screens:** home (subsystem tiles) → module list → live view (START/HALT,
-  scrolling result rows, status line), plus Setup, touch test and calibration.
-  nRF24 / RFID / IR tiles say "Not on deck" and open a note pointing at
+- **Screens:** home is a 3×3 grid (`HOME_ITEMS`: Wi-Fi, BLE, nRF24, RFID, IR,
+  Touch, Settings, two reserved slots) with a thin up/down arrow rail on the
+  right that scrolls a row at a time once there are more than nine items. A
+  subsystem opens its module list, then the live view (Start/Stop, newest
+  results in a card, status bar). **Touch** holds recalibration and the touch
+  test; **Settings** holds brightness (10 steps, `analogWrite` PWM on the BL
+  pin) and Dark/Light, both saved in `Preferences` namespace `cdui`. nRF24 /
+  RFID / IR tiles say "Not on deck" and open a note pointing at
   `unified_firmware`.
 - **Theme:** dark "industrial" palette (`C_BG`/`C_PANEL`/`C_RAISED`/`C_EDGE`
-  surfaces, `C_TEXT`/`C_MUTED`/`C_DIM` text, one accent per subsystem). Use
-  `printAt()` for the classic 6×8 font (it resets the GFX font) and `fontAt()`
+  surfaces, `C_TEXT`/`C_MUTED`/`C_DIM` text, one accent per subsystem), plus a
+  light set. The `C_*` colours are variables: `applyTheme(light)` swaps them
+  and the subsystem accents, so never cache a colour across a theme change.
+  Every screen uses `drawTopBar()` (Back + title); use `printAt()` for the
+  classic 6×8 font (it resets the GFX font) and `fontAt()` / `fontCentered()`
   for FreeSans.
 - **Non-blocking:** redraws are `millis()`-gated (live list at most ~8×/s). The
   same BLE caveat applies: GATT modules 2.2/2.5/2.6 freeze the UI ~1–3 s per
@@ -463,8 +471,6 @@ TX LED on GPIO5.
   uncompiled in the cloud (no Arduino toolchain) and needs a flash + a card to
   exercise 5.1–5.6 end-to-end. Clone (5.4) writes and NDEF (5.5) writes stay
   gated off by default.
-- Integrated firmware UI: 3×3 home grid with scroll arrows, a Settings tile
-  (brightness, light/dark mode), and an "i" info article for every function.
 - Port nRF24 / RFID / IR into the integrated firmware (after re-pinning them
   around the locked display pins), then retire `unified_firmware`.
 

@@ -104,7 +104,7 @@ cyberdeck-esp32s3/
 
 1. Install **Adafruit ILI9341** (with Adafruit GFX and Adafruit BusIO) and **ArduinoJson** v7 from the Library Manager.
 2. Open `firmware/00_integrated_cyberdeck_firmware/00_integrated_cyberdeck_firmware.ino`. Board settings: **ESP32S3 Dev Module**, Flash Size **16MB**, PSRAM **OPI PSRAM**, **USB CDC On Boot: Enabled**. Flash it.
-3. On first boot, tap the five crosshairs to calibrate touch. Then tap a subsystem, pick a module and press **START**. The USB dashboard below works at the same time, and the screen follows whatever it starts.
+3. On first boot, tap the five crosshairs to calibrate touch. Then tap a subsystem, pick a module and press **Start**. The USB dashboard below works at the same time, and the screen follows whatever it starts.
 
 Today the on-deck build carries Wi-Fi and BLE. For nRF24, RFID and IR, use the USB-only build below until they are ported.
 

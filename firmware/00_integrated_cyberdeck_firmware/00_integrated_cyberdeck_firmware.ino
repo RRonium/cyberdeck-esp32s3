@@ -11,10 +11,10 @@
   serial protocol is untouched, so the USB Web Serial dashboard can drive
   the same modules at the same time (the screen follows it).
 
-  Tap a subsystem -> tap a module -> START. Results stream onto the screen
+  Tap a subsystem -> tap a module -> Start. Results stream onto the screen
   the same way they fill the dashboard table (SSID/ch/RSSI for Wi-Fi,
   name/UUID/RSSI for BLE). Status and error lines ("module active",
-  "connect failed", ...) show at the bottom. HALT stops the module.
+  "connect failed", ...) show at the bottom. Stop halts the module.
 
   nRF24 / RFID / IR: NOT in this firmware yet. Their tiles are shown as
   "Not on deck" and open a short note. To use those modules today, flash
@@ -858,6 +858,9 @@ int16_t fontWidth(const char* s, bool bold) {
   tft.setFont(nullptr);
   return bx + bw;
 }
+void fontCentered(const char* s, int16_t cx, int16_t baseline, bool bold, uint16_t color) {
+  fontAt(s, cx - fontWidth(s, bold) / 2, baseline, bold, color);
+}
 // Thick arc around (cx, cy), angles in degrees, 0 = right, 90 = up.
 void drawArc(int16_t cx, int16_t cy, int16_t r, int16_t a0, int16_t a1, uint8_t thick, uint16_t c) {
   for (uint8_t t = 0; t < thick; t++)
@@ -942,7 +945,10 @@ void drawTopBar(const char* title, uint16_t accent) {
   tft.fillRect(0, 0, W, HEADER_H - 1, C_PANEL);
   tft.drawFastHLine(0, HEADER_H - 1, W, C_EDGE);
   addButton(0, 0, 84, HEADER_H - 1, "Back", nullptr, accent, ST_BACK, ACT_BACK, 0);
-  if (title) fontAt(title, W - 12 - fontWidth(title, true), 22, true, C_TEXT);
+  if (!title) return;
+  int16_t tw = fontWidth(title, true);
+  if (tw <= W - 12 - 94) fontAt(title, W - 12 - tw, 22, true, C_TEXT);
+  else printAt(title, W - 12 - (int16_t)strlen(title) * 6, 13, 1, C_TEXT);
 }
 void drawHomeFooter() {
   int16_t y = H - FOOTER_H;
@@ -954,13 +960,6 @@ void drawHomeFooter() {
 }
 void printCentered(const char* s, int16_t cx, int16_t cy, uint8_t size, uint16_t color) {
   printAt(s, cx - (int16_t)strlen(s) * 3 * size, cy - 4 * size, size, color);
-}
-void drawHeader(const char* title, uint16_t accent, bool left) {
-  tft.fillRect(0, 0, W, HEADER_H - 2, C_PANEL);
-  tft.fillRect(0, HEADER_H - 2, W, 2, accent);
-  if (!title) return;
-  int16_t tw = strlen(title) * 12;
-  printAt(title, left ? 10 : W - tw - 10, 9, 2, accent);
 }
 void addButton(int16_t x, int16_t y, int16_t w, int16_t h, const char* label, const char* sub,
                uint16_t color, uint8_t style, uint8_t action, int8_t arg) {
@@ -1000,7 +999,7 @@ void drawChevron(int16_t cx, int16_t cy, int8_t dir, uint16_t c) {   // dir -1 u
   }
 }
 void drawButton(uint8_t i, bool pressed) {
-  const Button& b = btns[i]; uint16_t fg = pressed ? C_BG : b.color; const Rect& r = b.r;
+  const Button& b = btns[i]; const Rect& r = b.r;
   if (b.style == ST_GRID) {
     // Home tile: icon well on top, name under it, live dot in the corner.
     // Pressed = raised surface + accent outline (no colour flood).
@@ -1016,14 +1015,18 @@ void drawButton(uint8_t i, bool pressed) {
     drawIcon(icon, wx + well / 2, wy + well / 2, live ? b.color : mix565(b.color, face, 150), wellBg);
     fontAt(b.label, r.x + (r.w - fontWidth(b.label, true)) / 2, r.y + r.h - 7, true, live ? C_TEXT : C_MUTED);
     if (isSub) tft.fillCircle(r.x + r.w - 8, r.y + 8, 2, live ? C_OK : C_DIM);
-  } else if (b.style == ST_HEADER) {
-    tft.fillRect(r.x, r.y, r.w, r.h, pressed ? b.color : C_PANEL);
-    printCentered(b.label, r.x + r.w / 2, r.y + r.h / 2, 2, fg);
-  } else if (b.style == ST_ROW) {
-    tft.fillRoundRect(r.x, r.y, r.w, r.h, 5, pressed ? b.color : C_PANEL);
-    tft.drawRoundRect(r.x, r.y, r.w, r.h, 5, b.color);
-    printAt(b.label, r.x + 10, r.y + 6, 1, pressed ? C_BG : b.color);
-    if (b.sub) printAt(b.sub, r.x + 44, r.y + 6, 1, pressed ? C_BG : C_TEXT);
+  } else if (b.style == ST_HEADER) {   // text button inside the top bar
+    tft.fillRect(r.x, r.y, r.w, r.h, pressed ? C_RAISED : C_PANEL);
+    fontAt(b.label, r.x + (r.w - fontWidth(b.label, false)) / 2, r.y + r.h / 2 + 5, false, b.color);
+  } else if (b.style == ST_ROW) {      // module row: id chip, name, chevron
+    uint16_t face = pressed ? C_RAISED : C_PANEL;
+    tft.fillRoundRect(r.x, r.y, r.w, r.h, 6, face);
+    tft.drawRoundRect(r.x, r.y, r.w, r.h, 6, pressed ? b.color : C_EDGE);
+    tft.fillRoundRect(r.x + 7, r.y + (r.h - 17) / 2, 30, 17, 4, mix565(b.color, face, 50));
+    printAt(b.label, r.x + 7 + (30 - (int16_t)strlen(b.label) * 6) / 2, r.y + (r.h - 7) / 2, 1, b.color);
+    if (b.sub) fontAt(b.sub, r.x + 46, r.y + r.h / 2 + 5, false, C_TEXT);
+    int16_t cx = r.x + r.w - 12, cy = r.y + r.h / 2;
+    tft.drawLine(cx - 3, cy - 4, cx, cy, C_DIM); tft.drawLine(cx - 3, cy + 4, cx, cy, C_DIM);
   } else if (b.style == ST_ARROW) {   // thin scroll rail half; arg -1 up / +1 down
     bool on = b.color != C_DIM;
     tft.fillRoundRect(r.x, r.y, r.w, r.h, 5, pressed && on ? C_RAISED : C_PANEL);
@@ -1056,12 +1059,12 @@ void drawButton(uint8_t i, bool pressed) {
     tft.drawRoundRect(r.x, r.y, r.w, r.h, 6, sel ? b.color : C_EDGE);
     uint16_t fgc = sel ? (lightMode ? C_PANEL : C_BG) : C_TEXT;
     fontAt(b.label, r.x + (r.w - fontWidth(b.label, true)) / 2, r.y + r.h / 2 + 5, true, fgc);
-  } else {  // ST_PILL
-    tft.fillRoundRect(r.x, r.y, r.w, r.h, 9, pressed ? b.color : C_PANEL);
-    tft.drawRoundRect(r.x, r.y, r.w, r.h, 9, b.color);
-    tft.drawRoundRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2, 8, b.color);
-    uint8_t size = ((int16_t)strlen(b.label) * 18 <= r.w - 20) ? 3 : 2;
-    printCentered(b.label, r.x + r.w / 2, r.y + r.h / 2, size, fg);
+  } else {  // ST_PILL: action button, tinted at rest, filled when pressed
+    uint16_t face = pressed ? b.color : mix565(b.color, C_PANEL, 40);
+    tft.fillRoundRect(r.x, r.y, r.w, r.h, 7, face);
+    tft.drawRoundRect(r.x, r.y, r.w, r.h, 7, b.color);
+    uint16_t fgc = pressed ? (lightMode ? C_PANEL : C_BG) : b.color;
+    fontAt(b.label, r.x + (r.w - fontWidth(b.label, true)) / 2, r.y + r.h / 2 + 5, true, fgc);
   }
 }
 void drawTarget(uint8_t i, uint8_t mode) {
@@ -1085,50 +1088,49 @@ void calProgress() {
 }
 
 // ----- the live result view -----
+// Top bar (Back + module title), a control strip (id chip, count, Start/Stop),
+// a card with the newest results, and a status bar at the bottom.
+const int16_t STRIP_Y = HEADER_H + 6, STRIP_H = 30;
+const int16_t LIST_Y = STRIP_Y + STRIP_H + 6, LIST_ROW_H = 21, STATUS_H = 16;
+const uint8_t LIST_VISIBLE = (H - STATUS_H - 4 - LIST_Y) / LIST_ROW_H;
 void drawLiveChrome() {
   const Subsystem& s = SUBS[curSub];
+  const char* id = s.mods[curMod].id;
   tft.fillScreen(C_BG);
-  const char* id = SUBS[curSub].mods[curMod].id;
-  const char* title = moduleTitle(id);
-  drawHeader(nullptr, s.color, false);
-  addButton(0, 0, 90, HEADER_H - 2, "< BACK", nullptr, s.color, ST_HEADER, ACT_BACK, 0);
-  // module id + title right of BACK; long titles drop to the small font so
-  // they never run into the id or the BACK button
-  int16_t tw = strlen(title) * 12;
-  if (100 + (int16_t)strlen(id) * 12 + 10 + tw <= W - 10) {
-    printAt(id, 100, 9, 2, C_TEXT);
-    printAt(title, W - 10 - tw, 9, 2, s.color);
-  } else {
-    printAt(id, W - 10 - (int16_t)strlen(id) * 6, 6, 1, C_MUTED);
-    printAt(title, W - 10 - (int16_t)strlen(title) * 6, 18, 1, s.color);
-  }
-  // START / HALT pill
-  addButton(W - 96, HEADER_H + 4, 88, 30, running ? "HALT" : "START", nullptr,
+  drawTopBar(moduleTitle(id), s.color);
+  tft.fillRoundRect(8, STRIP_Y + 6, 34, 18, 4, mix565(s.color, C_BG, 50));
+  printAt(id, 8 + (34 - (int16_t)strlen(id) * 6) / 2, STRIP_Y + 11, 1, s.color);
+  addButton(W - 96, STRIP_Y, 88, STRIP_H, running ? "Stop" : "Start", nullptr,
             running ? C_OK : s.color, ST_PILL, ACT_TOGGLE, 0);
+  tft.fillRoundRect(6, LIST_Y - 2, W - 12, LIST_VISIBLE * LIST_ROW_H + 4, 6, C_PANEL);
+  tft.drawRoundRect(6, LIST_Y - 2, W - 12, LIST_VISIBLE * LIST_ROW_H + 4, 6, C_EDGE);
   listDirty = true; statusDirty = true;
 }
 void drawList() {
-  const int16_t x = 6, y0 = HEADER_H + 6, rowH = 18;
-  tft.fillRect(x, y0, W - 100, ROWS * rowH, C_BG);
+  const int16_t x = 12, w = W - 24;
+  tft.fillRect(x, LIST_Y, w, LIST_VISIBLE * LIST_ROW_H, C_PANEL);
   if (rowCount == 0) {
-    printAt(running ? "Scanning..." : "Tap START", x + 4, y0 + 4, 1, C_MUTED);
+    printAt(running ? "Scanning..." : "Tap Start to run this module", x + 2, LIST_Y + 7, 1, C_MUTED);
   } else {
-    for (uint8_t i = 0; i < rowCount; i++) {
-      // newest first
+    uint8_t n = rowCount < LIST_VISIBLE ? rowCount : LIST_VISIBLE;
+    for (uint8_t i = 0; i < n; i++) {               // newest first
       uint8_t idx = (rowHead + ROWS - 1 - i) % ROWS;
-      int16_t ry = y0 + i * rowH;
-      printAt(rowBuf[idx].a, x + 2, ry, 1, rowBuf[idx].color);
-      printAt(rowBuf[idx].b, x + 2, ry + 9, 1, C_MUTED);
+      int16_t ry = LIST_Y + i * LIST_ROW_H;
+      if (i) tft.drawFastHLine(x, ry - 1, w, C_EDGE);
+      tft.fillCircle(x + 3, ry + 6, 2, rowBuf[idx].color);
+      printAt(rowBuf[idx].a, x + 11, ry + 3, 1, C_TEXT);
+      printAt(rowBuf[idx].b, x + 11, ry + 12, 1, C_MUTED);
     }
   }
-  // count badge
+  // result counter in the control strip
   char c[20]; snprintf(c, sizeof(c), "%lu seen", rowTotal);
-  tft.fillRect(W - 96, HEADER_H + 40, 90, 10, C_BG);
-  printAt(c, W - 94, HEADER_H + 40, 1, C_MUTED);
+  tft.fillRect(50, STRIP_Y + 8, W - 96 - 56, 12, C_BG);
+  printAt(c, 50, STRIP_Y + 11, 1, C_MUTED);
 }
 void drawStatusLine() {
-  tft.fillRect(0, H - 14, W, 14, C_PANEL);
-  if (statusLine[0]) printAt(statusLine, 6, H - 12, 1, statusColor);
+  tft.fillRect(0, H - STATUS_H, W, STATUS_H, C_PANEL);
+  tft.drawFastHLine(0, H - STATUS_H, W, C_EDGE);
+  if (statusLine[0]) printAt(statusLine, 8, H - STATUS_H + 5, 1, statusColor);
 }
 
 // ===================================================================
@@ -1166,9 +1168,8 @@ void drawScreen() {
     case SCR_MODULES: {
       const Subsystem& s = SUBS[curSub];
       tft.fillScreen(C_BG);
-      drawHeader(s.name, s.color, false);
-      addButton(0, 0, 90, HEADER_H - 2, "< BACK", nullptr, s.color, ST_HEADER, ACT_BACK, 0);
-      const int16_t x = 8, y0 = HEADER_H + 6, rowH = 30, gap = 3;
+      drawTopBar(s.name, s.color);
+      const int16_t x = 8, y0 = HEADER_H + 5, rowH = 29, gap = 4;
       for (uint8_t i = 0; i < s.count; i++) {
         int16_t ry = y0 + i * (rowH + gap);
         addButton(x, ry, W - 16, rowH, s.mods[i].id, s.mods[i].name, s.color, ST_ROW, ACT_OPEN_MOD, i);
@@ -1180,11 +1181,14 @@ void drawScreen() {
     case SCR_SOON: {
       const Subsystem& s = SUBS[curSub];
       tft.fillScreen(C_BG);
-      drawHeader(s.name, s.color, false);
-      addButton(0, 0, 90, HEADER_H - 2, "< BACK", nullptr, s.color, ST_HEADER, ACT_BACK, 0);
-      printCentered("Not on the screen yet", W / 2, 96, 2, C_TEXT);
-      printCentered("Not in this firmware yet. Flash", W / 2, 128, 1, C_MUTED);
-      printCentered("unified_firmware to use it over USB.", W / 2, 142, 1, C_MUTED);
+      drawTopBar(s.name, s.color);
+      { const int16_t well = 44, wx = (W - well) / 2, wy = 66;
+        uint16_t bg = mix565(s.color, C_BG, 40);
+        tft.fillRoundRect(wx, wy, well, well, 10, bg);
+        drawIcon(curSub, wx + well / 2, wy + well / 2, s.color, bg); }
+      fontCentered("Not on the deck yet", W / 2, 140, true, C_TEXT);
+      printCentered("This firmware doesn't include it yet.", W / 2, 162, 1, C_MUTED);
+      printCentered("Flash unified_firmware to use it over USB.", W / 2, 176, 1, C_MUTED);
       for (uint8_t i = 0; i < btnCount; i++) drawButton(i, false);
       return;
     }
@@ -1198,17 +1202,19 @@ void drawScreen() {
 
     case SCR_SETUP: {
       tft.fillScreen(C_BG);
-      drawHeader("SETUP", C_CYAN, false);
-      addButton(0, 0, 90, HEADER_H - 2, "< BACK", nullptr, C_CYAN, ST_HEADER, ACT_BACK, 0);
-      addButton(12, 44, W - 24, 48, "RECALIBRATE", nullptr, C_CYAN, ST_PILL, ACT_CALIBRATE, 0);
-      addButton(12, 100, W - 24, 48, "TOUCH TEST", nullptr, C_CYAN, ST_PILL, ACT_TEST, 0);
+      drawTopBar("Touch", C_CYAN);
+      addButton(12, HEADER_H + 10, W - 24, 40, "Recalibrate", nullptr, C_CYAN, ST_PILL, ACT_CALIBRATE, 0);
+      addButton(12, HEADER_H + 58, W - 24, 40, "Touch test", nullptr, C_CYAN, ST_PILL, ACT_TEST, 0);
       char line[52];
-      if (haveSavedCal) snprintf(line, sizeof(line), "Calibration saved, max error %.1f px", savedErr);
-      else snprintf(line, sizeof(line), "Calibration: default (not calibrated)");
-      printAt(line, 12, 164, 1, C_TEXT);
-      printAt("Wi-Fi + BLE are live on-deck.", 12, 182, 1, C_MUTED);
-      printAt("USB Web Serial works at the same time.", 12, 198, 1, C_MUTED);
-      printAt("Hold the screen at power-on to recalibrate.", 12, 214, 1, C_MUTED);
+      if (haveSavedCal) snprintf(line, sizeof(line), "Saved, max error %.1f px", savedErr);
+      else snprintf(line, sizeof(line), "Default (not calibrated yet)");
+      tft.fillRoundRect(12, 150, W - 24, 74, 6, C_PANEL);
+      tft.drawRoundRect(12, 150, W - 24, 74, 6, C_EDGE);
+      fontAt("Calibration", 22, 170, true, C_TEXT);
+      tft.fillCircle(25, 184, 2, haveSavedCal ? C_OK : C_WARN);
+      printAt(line, 32, 181, 1, C_MUTED);
+      printAt("Hold the screen at power-on to", 22, 198, 1, C_DIM);
+      printAt("recalibrate from the boot splash.", 22, 210, 1, C_DIM);
       for (uint8_t i = 0; i < btnCount; i++) drawButton(i, false);
       return;
     }
@@ -1232,16 +1238,15 @@ void drawScreen() {
 
     case SCR_TEST:
       tft.fillScreen(C_BG);
-      drawHeader(nullptr, C_CYAN, false);
-      addButton(0, 0, 88, HEADER_H - 2, "< BACK", nullptr, C_CYAN, ST_HEADER, ACT_BACK, 0);
-      addButton(W - 88, 0, 88, HEADER_H - 2, "CLEAR", nullptr, C_CYAN, ST_HEADER, ACT_CLEAR, 0);
-      printCentered("Touch anywhere - a dot marks where it lands", W / 2, HEADER_H + 10, 1, C_MUTED);
+      drawTopBar(nullptr, C_CYAN);
+      addButton(W - 84, 0, 84, HEADER_H - 1, "Clear", nullptr, C_CYAN, ST_HEADER, ACT_CLEAR, 0);
+      printCentered("Touch anywhere - a dot marks where it lands", W / 2, HEADER_H + 12, 1, C_MUTED);
       for (uint8_t i = 0; i < btnCount; i++) drawButton(i, false);
       return;
 
     case SCR_CALIB:
       tft.fillScreen(C_BG);
-      printCentered("TOUCH CALIBRATION", W / 2, 66, 2, C_CYAN);
+      fontCentered("Touch calibration", W / 2, 72, true, C_TEXT);
       printCentered("A stylus or fingernail is most accurate", W / 2, 84, 1, C_MUTED);
       printCentered("Press and hold the centre of the cross", W / 2, 148, 1, C_TEXT);
       calProgress();
@@ -1252,13 +1257,13 @@ void drawScreen() {
       tft.fillScreen(C_BG);
       char line[40];
       bool good = candidateErr <= 6, ok = candidateErr <= 12;
-      printCentered(good ? "CALIBRATED" : (ok ? "CALIBRATED (OK)" : "CALIBRATION IS OFF"),
-                    W / 2, 30, 2, good ? C_OK : (ok ? C_CYAN : C_WARN));
+      fontCentered(good ? "Calibrated" : (ok ? "Calibrated (OK)" : "Calibration is off"),
+                   W / 2, 44, true, good ? C_OK : (ok ? C_CYAN : C_WARN));
       snprintf(line, sizeof(line), "Max error: %.1f px", candidateErr);
-      printCentered(line, W / 2, 60, 2, C_TEXT);
-      printCentered(ok ? "Tap SAVE to keep it." : "Retry: press firmly on each centre.", W / 2, 92, 1, C_MUTED);
-      addButton(6, 116, 151, 116, "RETRY", nullptr, C_WARN, ST_PILL, ACT_CAL_RETRY, 0);
-      addButton(163, 116, 151, 116, "SAVE", nullptr, C_OK, ST_PILL, ACT_CAL_SAVE, 0);
+      printCentered(line, W / 2, 66, 1, C_TEXT);
+      printCentered(ok ? "Tap Save to keep it." : "Retry: press firmly on each centre.", W / 2, 86, 1, C_MUTED);
+      addButton(12, 116, 142, 104, "Retry", nullptr, C_WARN, ST_PILL, ACT_CAL_RETRY, 0);
+      addButton(166, 116, 142, 104, "Save", nullptr, C_OK, ST_PILL, ACT_CAL_SAVE, 0);
       for (uint8_t i = 0; i < btnCount; i++) drawButton(i, false);
       return;
     }
@@ -1417,7 +1422,7 @@ void doAction(uint8_t i) {
     case ACT_TOGGLE:
       if (running) { stopLiveModule(); setStatus("Halted", C_MUTED); }
       else         { startLiveModule(); setStatus("Started", C_OK); }
-      btns[i].label = running ? "HALT" : "START";
+      btns[i].label = running ? "Stop" : "Start";
       btns[i].color = running ? C_OK : SUBS[curSub].color;
       drawButton(i, false);
       break;
